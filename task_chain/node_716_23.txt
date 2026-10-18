@@ -1,0 +1,15 @@
+FINAL CODE: KESTREL-4471  (this is the last file in the chain)
+2026-10-11T17:30:37 worker-7 req=806995 latency_ms=98034 status=503
+2026-10-11T09:56:54 worker-7 req=947568 latency_ms=1683 status=503
+2026-10-11T03:01:24 worker-3 req=155642 latency_ms=87861 status=200
+2026-10-11T06:17:48 worker-3 req=400538 latency_ms=89583 status=200
+2026-10-11T04:53:03 worker-5 req=313910 latency_ms=98785 status=503
+2026-10-11T01:22:52 worker-8 req=207458 latency_ms=80764 status=503
+2026-10-11T07:47:41 worker-9 req=507777 latency_ms=31152 status=503
+2026-10-11T22:18:44 worker-1 req=500118 latency_ms=50807 status=500
+2026-10-11T21:20:35 worker-1 req=113595 latency_ms=97484 status=200
+2026-10-11T06:39:55 worker-8 req=970300 latency_ms=29573 status=200
+2026-10-11T18:34:47 worker-4 req=913848 latency_ms=95025 status=200
+2026-10-11T09:28:11 worker-2 req=296059 latency_ms=22789 status=503
+2026-10-11T03:24:02 worker-7 req=392670 latency_ms=72964 status=200
+2026-10-11T04:10:37 worker-5 req=105919 latency_ms=43337 status=500

@@ -1,0 +1,15 @@
+next: node_242_08.txt
+2026-10-11T15:45:01 worker-7 req=785386 latency_ms=21636 status=503
+2026-10-11T13:10:03 worker-2 req=447177 latency_ms=26951 status=200
+2026-10-11T13:44:35 worker-9 req=378150 latency_ms=86595 status=200
+2026-10-11T09:15:06 worker-1 req=511987 latency_ms=74953 status=503
+2026-10-11T15:09:03 worker-6 req=104000 latency_ms=56057 status=200
+2026-10-11T09:52:42 worker-8 req=309374 latency_ms=12722 status=200
+2026-10-11T06:10:40 worker-5 req=185916 latency_ms=62081 status=200
+2026-10-11T09:50:25 worker-8 req=612855 latency_ms=86653 status=200
+2026-10-11T02:41:34 worker-7 req=293862 latency_ms=48640 status=500
+2026-10-11T11:11:28 worker-1 req=376085 latency_ms=57647 status=500
+2026-10-11T08:14:53 worker-5 req=691655 latency_ms=8089 status=200
+2026-10-11T22:42:06 worker-2 req=800596 latency_ms=45071 status=503
+2026-10-11T13:48:37 worker-4 req=680493 latency_ms=8003 status=500
+2026-10-11T16:26:34 worker-8 req=700534 latency_ms=30896 status=500

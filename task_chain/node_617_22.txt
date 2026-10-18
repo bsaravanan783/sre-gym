@@ -1,0 +1,15 @@
+next: node_189_14.txt
+2026-10-11T02:48:34 worker-3 req=234628 latency_ms=86484 status=500
+2026-10-11T17:10:16 worker-9 req=736059 latency_ms=55471 status=200
+2026-10-11T17:48:46 worker-4 req=847581 latency_ms=40867 status=500
+2026-10-11T21:41:23 worker-8 req=642717 latency_ms=59187 status=200
+2026-10-11T07:14:04 worker-6 req=122056 latency_ms=77120 status=503
+2026-10-11T07:37:14 worker-1 req=174441 latency_ms=92788 status=200
+2026-10-11T07:04:57 worker-1 req=446479 latency_ms=9297 status=503
+2026-10-11T07:17:42 worker-8 req=324643 latency_ms=70688 status=200
+2026-10-11T23:59:56 worker-8 req=354801 latency_ms=62003 status=500
+2026-10-11T06:06:06 worker-7 req=471507 latency_ms=55529 status=500
+2026-10-11T14:55:46 worker-1 req=806073 latency_ms=85659 status=200
+2026-10-11T01:25:46 worker-6 req=939482 latency_ms=14332 status=200
+2026-10-11T06:12:34 worker-8 req=246991 latency_ms=55306 status=200
+2026-10-11T08:29:15 worker-2 req=564656 latency_ms=72142 status=200

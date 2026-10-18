@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+
+# NixOS gcc runtime symlink (local only)
+.gcc-lib*
+
+# Run artefacts: regenerated on every run
+**/.outputs/
+**/transcript.jsonl
+*.log

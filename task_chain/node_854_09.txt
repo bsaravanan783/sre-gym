@@ -1,0 +1,15 @@
+next: node_106_38.txt
+2026-10-11T01:00:19 worker-2 req=451317 latency_ms=37308 status=500
+2026-10-11T20:34:33 worker-8 req=240718 latency_ms=66098 status=500
+2026-10-11T08:12:51 worker-2 req=446747 latency_ms=21308 status=500
+2026-10-11T20:16:45 worker-3 req=114768 latency_ms=96559 status=200
+2026-10-11T09:36:43 worker-4 req=284019 latency_ms=80089 status=500
+2026-10-11T13:32:20 worker-2 req=520304 latency_ms=87730 status=200
+2026-10-11T05:08:30 worker-6 req=360096 latency_ms=905 status=200
+2026-10-11T12:15:28 worker-5 req=445637 latency_ms=39586 status=503
+2026-10-11T23:36:00 worker-5 req=785436 latency_ms=47137 status=200
+2026-10-11T01:42:07 worker-8 req=421709 latency_ms=20944 status=500
+2026-10-11T21:32:59 worker-5 req=823821 latency_ms=15399 status=200
+2026-10-11T11:39:14 worker-4 req=240057 latency_ms=62686 status=200
+2026-10-11T14:47:38 worker-6 req=536045 latency_ms=92014 status=503
+2026-10-11T15:48:34 worker-4 req=898867 latency_ms=32445 status=503

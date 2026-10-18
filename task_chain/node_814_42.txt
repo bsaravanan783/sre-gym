@@ -1,0 +1,15 @@
+next: node_448_44.txt
+2026-10-11T17:53:42 worker-6 req=175576 latency_ms=52054 status=200
+2026-10-11T13:01:29 worker-2 req=428267 latency_ms=75475 status=500
+2026-10-11T18:25:45 worker-7 req=403578 latency_ms=15106 status=500
+2026-10-11T00:20:10 worker-8 req=972442 latency_ms=90398 status=200
+2026-10-11T02:27:54 worker-2 req=355135 latency_ms=57114 status=503
+2026-10-11T12:33:05 worker-7 req=425346 latency_ms=97764 status=200
+2026-10-11T07:21:49 worker-3 req=180089 latency_ms=66920 status=200
+2026-10-11T16:32:12 worker-6 req=468154 latency_ms=95349 status=200
+2026-10-11T07:06:09 worker-5 req=306854 latency_ms=22750 status=503
+2026-10-11T04:48:48 worker-2 req=285751 latency_ms=82316 status=500
+2026-10-11T14:48:36 worker-8 req=814220 latency_ms=73999 status=503
+2026-10-11T10:55:40 worker-6 req=258290 latency_ms=57650 status=200
+2026-10-11T15:28:40 worker-5 req=935012 latency_ms=36012 status=503
+2026-10-11T01:22:32 worker-2 req=425486 latency_ms=60531 status=500

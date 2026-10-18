@@ -1,0 +1,15 @@
+next: node_384_35.txt
+2026-10-11T09:05:25 worker-1 req=626491 latency_ms=74880 status=503
+2026-10-11T18:43:39 worker-3 req=226124 latency_ms=99256 status=500
+2026-10-11T05:10:13 worker-4 req=232315 latency_ms=5603 status=500
+2026-10-11T02:43:27 worker-4 req=962520 latency_ms=82221 status=200
+2026-10-11T19:16:20 worker-2 req=191254 latency_ms=50878 status=503
+2026-10-11T12:35:20 worker-5 req=644932 latency_ms=60061 status=200
+2026-10-11T22:39:37 worker-9 req=919656 latency_ms=55007 status=200
+2026-10-11T13:09:09 worker-2 req=210766 latency_ms=73762 status=200
+2026-10-11T09:55:34 worker-6 req=530849 latency_ms=34630 status=500
+2026-10-11T20:31:36 worker-8 req=139285 latency_ms=22580 status=200
+2026-10-11T12:09:39 worker-7 req=140666 latency_ms=51887 status=200
+2026-10-11T22:15:03 worker-8 req=381631 latency_ms=48826 status=200
+2026-10-11T10:52:50 worker-5 req=426053 latency_ms=36755 status=500
+2026-10-11T22:43:06 worker-4 req=240913 latency_ms=39394 status=500

@@ -1,0 +1,15 @@
+next: node_381_05.txt
+2026-10-11T15:22:30 worker-2 req=559450 latency_ms=94643 status=500
+2026-10-11T10:04:19 worker-1 req=949541 latency_ms=93173 status=200
+2026-10-11T00:54:21 worker-2 req=810032 latency_ms=21552 status=200
+2026-10-11T16:11:35 worker-3 req=447067 latency_ms=73390 status=500
+2026-10-11T14:14:51 worker-7 req=760351 latency_ms=24186 status=200
+2026-10-11T20:42:27 worker-7 req=130610 latency_ms=96660 status=503
+2026-10-11T06:28:37 worker-7 req=507723 latency_ms=593 status=200
+2026-10-11T06:17:48 worker-2 req=705393 latency_ms=13346 status=503
+2026-10-11T05:23:20 worker-4 req=579776 latency_ms=14946 status=200
+2026-10-11T21:55:31 worker-9 req=770153 latency_ms=41088 status=503
+2026-10-11T12:39:25 worker-2 req=464825 latency_ms=46145 status=500
+2026-10-11T19:11:52 worker-5 req=744333 latency_ms=77364 status=200
+2026-10-11T21:08:20 worker-2 req=350161 latency_ms=40036 status=200
+2026-10-11T05:23:44 worker-3 req=635638 latency_ms=50926 status=500

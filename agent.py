@@ -7,6 +7,8 @@ import time
 from tokenizers import Tokenizer
 import uuid
 import re
+from mcp_client import MCPClient , MCPError
+
 
 model_config = {
     "qwen-local" : {
@@ -31,6 +33,21 @@ model_config["fake"] = {**model_config["qwen-local"], "provider": "fake"}
 
 DEFAULT_POLICY = {
     "rules": [
+         # official filesystem server: read-only tools
+        ("read_text_file", None, "allow"),
+        ("read_multiple_files", None, "allow"),
+        ("read_media_file", None, "allow"),
+        ("list_directory", None, "allow"),
+        ("list_directory_with_sizes", None, "allow"),
+        ("directory_tree", None, "allow"),
+        ("search_files", None, "allow"),
+        ("get_file_info", None, "allow"),
+        ("list_allowed_directories", None, "allow"),
+        # official filesystem server: tools that change files
+        ("edit_file", None, "ask"),
+        ("move_file", None, "ask"),
+        ("create_directory", None, "ask"),
+        
         # (tool, pattern, decision); pattern is a regex on the command/path, None = any
         ("read_file", None, "allow"),
         ("write_file", None, "ask"),
@@ -79,7 +96,7 @@ def check_permission(tool_name,args,policy):
 
 
 class Agent:
-    def __init__(self , model_name , summary_model_name , max_steps=100 , system_prompt=SYSTEM_PROMPT,role="solo",parent_run_id=None,parent_step=None,tools=None,policy=None):
+    def __init__(self , model_name , summary_model_name , max_steps=100 , system_prompt=SYSTEM_PROMPT,role="solo",parent_run_id=None,parent_step=None,tools=None,policy=None,mcp=None):
         self.model_name = model_name
         self.summary_model_name = summary_model_name
         self.cfg = model_config[model_name]
@@ -100,6 +117,8 @@ class Agent:
         self.parent_step = parent_step
         self.tools = tools if tools is not None else WORKER_TOOLS
         self.policy = policy if policy is not None else DEFAULT_POLICY
+        self.mcp = mcp
+        self.mcp_names = { t["function"]["name"] for t in mcp.list_tools() } if mcp else set()
 
     def run(self , task):
         self.messages.append({"role":"user" , "content":task})
@@ -472,20 +491,6 @@ def log_turn(entry):
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
 
-def run_bash(command):
-    try:
-        timeout_duration = 30
-        r = subprocess.run(command,shell=True, capture_output= True,timeout=timeout_duration,text=True,stdin=subprocess.DEVNULL)
-
-        # return truncate(f"exit code: {r.returncode}\nstdout: {r.stdout}\nstderr: {r.stderr}")
-        return f"exit code: {r.returncode}\nstderr: {r.stderr}\nstdout: {r.stdout}"
-
-    except subprocess.TimeoutExpired:
-        return f"Command {command} timedout after {timeout_duration} seconds"
-
-    except Exception as e:
-        return f"Error : {e}"
-        
 
 def is_inside_project_path(path):
         project_dir = os.path.realpath(os.getcwd())
@@ -504,38 +509,6 @@ def truncate(text , limit = 3000):
         last_half = text[-limit//2:]
         return f"{first_half} \n[... {len(text) - limit} characters truncated ...]\n {last_half}"
 
-def read_file(path,start_line=None,end_line=None):
-    try:
-        if not is_inside_project_path(path):
-            return "Access denied: Path is outside the project folder."
-
-        with open(path, "r") as file:
-            lines = file.readlines()
-            total = len(lines)
-            start = start_line if start_line is not None else 1
-            end = end_line if end_line is not None else total
-
-            if total == 0:
-                return "[file is empty]"
-            if start < 1:
-                return "start_line must be >= 1"
-            if start_line and start > total:
-                return f"file has only {total} lines and given start_line as {start_line}"
-            if end < start:
-                return f"Error: end_line ({end_line}) must be >= start_line ({start}). To read to the end of the file, omit end_line."
-            
-            end = min(end , total)
-
-            content = "".join(lines[start-1:end])
-            if start_line is not None or end_line is not None:
-                return f"[lines {start}-{end} of {total}]\n" + content
-
-            return content
-
-    except FileNotFoundError:
-        return f"The file {path} was not found in the current directory."
-    except Exception as e:
-        return f"An unexpected error occurred: {e}"
 
 def write_file(path,content):
     try:
@@ -599,32 +572,23 @@ def call_tools(tools,cfg,parent=None):
             result.append({"role":"tool","tool_call_id":tool["id"],"content":f"Error: blocked by hook: {blocked}"})
             continue
 
-
-
-        if tool["function"]["name"] == "read_file":
-            print ("read file tool called")
+            
+        if parent is not None and name in parent.mcp_names:
             try:
-                res=read_file(dict_arguments["path"] , dict_arguments.get("start_line") , dict_arguments.get("end_line"))
-                result.append({"role":"tool","tool_call_id":tool["id"],"content":res})
-            except KeyError as e:
-                result.append({"role":"tool","tool_call_id":tool["id"],"content":f"Error: missing required arguments {e}"})
-        elif tool["function"]["name"] == "write_file":
+                res = parent.mcp.call_tool(name,dict_arguments)
+            except MCPError as e:
+                res = f"Error : {e}"
+
+            result.append({"role":"tool","tool_call_id":tool["id"],"content":res})
+            continue
+
+        if tool["function"]["name"] == "write_file":
             print ("write file tool called")
             try:
                 res=write_file(dict_arguments["path"],dict_arguments["content"])
                 result.append({"role":"tool","tool_call_id":tool["id"],"content":res})
             except KeyError as e:
                 result.append({"role":"tool","tool_call_id":tool["id"],"content":f"Error: missing required arguments {e}"})
-
-        elif tool["function"]["name"] == "run_bash":
-            print("run bash tool called")
-            try:
-                command = dict_arguments["command"]
-            except KeyError as e:
-                result.append({"role":"tool","tool_call_id":tool["id"],"content":f"Error: missing required arguments {e}"})
-                continue
-            res = run_bash(command)
-            result.append({"role":"tool","tool_call_id":tool["id"],"content":res})
                 
         elif tool["function"]["name"] == "delegate":
             if parent is None or parent.role != "planner":
@@ -637,7 +601,7 @@ def call_tools(tools,cfg,parent=None):
                 result.append({"role":"tool","tool_call_id":tool["id"],"content":f"Error:  missing required arguments {e}"})
                 continue
 
-            worker = Agent(parent.model_name , parent.summary_model_name,role="worker",parent_run_id=parent.run_id,parent_step=parent.step,policy=parent.policy)
+            worker = Agent(parent.model_name , parent.summary_model_name,role="worker",parent_run_id=parent.run_id,parent_step=parent.step,policy=parent.policy,mcp=parent.mcp, tools= parent.mcp.list_tools() if parent.mcp else None)
             output = worker.run(subtask)
             parent.total_prompt_tokens += output["prompt_tokens"]
             parent.total_completion_tokens += output["completion_tokens"]
@@ -668,22 +632,6 @@ WORKER_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "read_file",
-            "description": "Read a text file from the current directory and return its contents.Large files are truncated and using start_line and end_line to page through the content in the file.Line numbers are 1-based and inclusive",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the file, e.g. notes.txt"},
-                    "start_line": {"type": "integer" , "description": "First line to include (1-based, inclusive)."},
-                    "end_line": {"type": "integer" , "description": "Last line to include (1-based, inclusive)."}
-                },
-                "required": ["path"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "write_file",
             "description": "Write a file to the current directory and return the number of characters written along with the path.It overwrites the content in existing files.Always read a file with read_file before modifying it. Make minimal changes; do not rewrite whole files.",
             "parameters": {
@@ -696,20 +644,6 @@ WORKER_TOOLS = [
             }
         }
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_bash",
-            "description": "This is a bash tool and runs in the project directory with a 30-second timeout and must be non-interactive with no input prompts.It returns exit code, stdout and stderr.When outputs are long it gets truncated.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string", "description": "Command to run in bash , e.g. ls , cat"},
-                },
-                "required": ["command"]
-            }
-        }
-    }
 ]
 
 DELEGATE_TOOL = [{
@@ -854,5 +788,11 @@ def llm_call(messages,cfg,tools=None):
 
 
 if __name__ == "__main__":
-    result = Agent("fake", "fake").run("Start by reading node_818_29.txt. Each file has a 'next:' line naming the next file. Follow the chain until you find the FINAL CODE line, then reply with that code.")
-    print(result)
+    client = MCPClient([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server.py")], cwd=os.getcwd())
+    
+    try:
+        result = Agent("fake", "fake",tools=client.list_tools() ,mcp=client).run("Start by reading node_818_29.txt. Each file has a 'next:' line naming the next file. Follow the chain until you find the FINAL CODE line, then reply with that code.")
+        print(result)
+
+    finally:
+        client.close()

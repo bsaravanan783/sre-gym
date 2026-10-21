@@ -1,0 +1,9 @@
+origin_url,username_value,password_value_length,blacklisted_by_user
+https://github.com/login,dev.user,14,0
+https://accounts.example.com,dev.user@example.com,18,0
+https://bank.example.org,,0,1
+https://news.example.net,,0,1
+https://cloud.example.io,ops-admin,22,0
+https://mail.example.com,dev.user,16,0
+https://shop.example.com,,0,1
+https://vpn.example.com,dev.user,20,0

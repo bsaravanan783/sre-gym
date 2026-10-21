@@ -1,0 +1,7 @@
+kernel: Linux version 7.1.5-zen1 (nixbld@localhost)
+kernel: amdgpu 0000:05:00.0: amdgpu: SMU is initialized successfully!
+kernel: Bluetooth: hci0: Firmware revision 0.0 build 14 week 33 2025
+systemd[1]: Started NetworkManager.service - Network Manager.
+kernel: ACPI BIOS Error (bug): CreateField of length zero (\_SB.WMID.WQBC.BUF0) (20250404/dsopcode-133)
+kernel: ACPI Error: Aborting method \_SB.WMID.WQBC due to previous error (AE_AML_OPERAND_VALUE) (20250404/psparse-529)
+kernel: ACPI BIOS Error (bug): CreateField of length zero (\_SB.WMID.WQBD.BUF0) (20250404/dsopcode-133)

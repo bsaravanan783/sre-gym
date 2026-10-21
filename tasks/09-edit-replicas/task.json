@@ -1,0 +1,22 @@
+{
+  "prompt": "Change deploy.yaml so the payments deployment runs 3 replicas. Change nothing else in the file.",
+  "max_steps": 5,
+  "needs_write": true,
+  "checks": [
+    {
+      "type": "file_regex",
+      "path": "deploy.yaml",
+      "pattern": "(?m)^  replicas: 3\\s*$"
+    },
+    {
+      "type": "file_regex",
+      "path": "deploy.yaml",
+      "pattern": "(?m)^          image: registry\\.example\\.com/payments:1\\.4\\.2\\s*$"
+    },
+    {
+      "type": "file_regex",
+      "path": "deploy.yaml",
+      "pattern": "(?m)^            - containerPort: 8080\\s*$"
+    }
+  ]
+}

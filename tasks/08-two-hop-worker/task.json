@@ -1,0 +1,11 @@
+{
+  "prompt": "Read incident.txt, then use app.log to find which worker served the request it mentions. End your reply with one line in exactly this form: ANSWER: <value>",
+  "max_steps": 5,
+  "needs_write": false,
+  "checks": [
+    {
+      "type": "answer_regex",
+      "pattern": "ANSWER:\\W*worker-1\\b"
+    }
+  ]
+}

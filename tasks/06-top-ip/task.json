@@ -1,0 +1,11 @@
+{
+  "prompt": "Which client IP made the most requests in access.log? End your reply with one line in exactly this form: ANSWER: <value>",
+  "max_steps": 5,
+  "needs_write": false,
+  "checks": [
+    {
+      "type": "answer_regex",
+      "pattern": "ANSWER:\\W*10\\.4\\.2\\.17(?![\\d.])"
+    }
+  ]
+}

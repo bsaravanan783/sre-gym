@@ -1,0 +1,14 @@
+[41200.112] gpu-screen-recorder[3317]: replay buffer: 60s, storage=ram, encoder=h264_vaapi
+[41890.554] earlyoom[905]: mem avail:   612 of 14336 MiB ( 4.27%), swap free: 1012 of 8191 MiB (12.35%)
+[41893.020] kitty invoked oom-killer: gfp_mask=0x140cca(GFP_HIGHUSER_MOVABLE|__GFP_COMP), order=0, oom_score_adj=0
+[41893.021] Tasks state (memory values in pages):
+[41893.021] [  pid  ]   uid  tgid  total_vm      rss  name
+[41893.021] [   2210]  1000  2210    525312   402113  quickshell
+[41893.021] [   3317]  1000  3317    861120   301442  gpu-screen-recorder
+[41893.021] [   4121]  1000  4121 383179883  2450120  electron
+[41893.021] [   1874]  1000  1874    301002   190221  kitty
+[41893.022] Out of memory: Killed process 4121 (electron) total-vm:1532719532kB, anon-rss:9800480kB, file-rss:0kB, shmem-rss:0kB, UID:1000 pgtables:61232kB oom_score_adj:300
+[41893.940] oom_reaper: reaped process 4121 (electron), now anon-rss:0kB, file-rss:0kB, shmem-rss:0kB
+[41901.377] quickshell invoked oom-killer: gfp_mask=0x140cca(GFP_HIGHUSER_MOVABLE|__GFP_COMP), order=0, oom_score_adj=0
+[41901.379] Out of memory: Killed process 2210 (quickshell) total-vm:2101248kB, anon-rss:1608452kB, file-rss:0kB, shmem-rss:0kB, UID:1000 pgtables:4120kB oom_score_adj:200
+[41902.004] NVRM: GPU at PCI:0000:01:00: Out of memory [NV_ERR_NO_MEMORY]

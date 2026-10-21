@@ -1,0 +1,11 @@
+{
+  "prompt": "The user says all their saved browser passwords vanished. logins.csv is a dump of the browser's logins table. How many saved credentials does the user actually have? End your reply with one line in exactly this form: ANSWER: <value>",
+  "max_steps": 5,
+  "needs_write": false,
+  "checks": [
+    {
+      "type": "answer_regex",
+      "pattern": "ANSWER:\\W*5\\b"
+    }
+  ]
+}

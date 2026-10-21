@@ -1,0 +1,15 @@
+{
+  "prompt": "boot-0.log is the current boot, where the code editor crashed. boot-1.log is the previous boot, which was fine. Which error is new in the current boot, and which process triggered it?",
+  "max_steps": 5,
+  "needs_write": false,
+  "checks": [
+    {
+      "type": "answer_regex",
+      "pattern": "(?i)(ring gfx|gfx_0|ring timeout|gpu (ring )?hang|page fault)"
+    },
+    {
+      "type": "answer_regex",
+      "pattern": "(?i)\\bcodium\\b"
+    }
+  ]
+}

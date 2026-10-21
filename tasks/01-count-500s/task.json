@@ -1,0 +1,11 @@
+{
+  "prompt": "How many requests in app.log failed with status 500 exactly (not other 5xx codes)? End your reply with one line in exactly this form: ANSWER: <value>",
+  "max_steps": 5,
+  "needs_write": false,
+  "checks": [
+    {
+      "type": "answer_regex",
+      "pattern": "ANSWER:\\W*5\\b"
+    }
+  ]
+}

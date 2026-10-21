@@ -1,0 +1,14 @@
+Aug 30 22:25:41 laptop systemd[1]: Stopping user@1000.service - User Manager for UID 1000...
+Aug 30 22:25:42 laptop kernel: nvidia-modeset: ERROR: GPU:0: Error while waiting for GPU progress: 0x0000c67d:0 2:1:0:4044
+Aug 30 22:25:43 laptop systemd[1]: Stopped target graphical.target - Graphical Interface.
+Aug 30 22:25:44 laptop systemd[1]: Stopping NetworkManager.service - Network Manager...
+Aug 30 22:25:47 laptop kernel: nvidia-modeset: ERROR: GPU:0: Error while waiting for GPU progress: 0x0000c67d:0 2:1:0:4044
+Aug 30 22:25:48 laptop systemd[1]: Stopped NetworkManager.service - Network Manager.
+Aug 30 22:25:50 laptop systemd[1]: Reached target shutdown.target - System Shutdown.
+Aug 30 22:25:51 laptop systemd[1]: Reached target final.target - Late Shutdown Services.
+Aug 30 22:25:52 laptop kernel: nvidia-modeset: ERROR: GPU:0: Error while waiting for GPU progress: 0x0000c67d:0 2:1:0:4044
+Aug 30 22:25:53 laptop systemd[1]: Reached target poweroff.target - System Power Off.
+Aug 30 22:25:53 laptop systemd-shutdown[1]: Syncing filesystems and block devices.
+Aug 30 22:25:54 laptop systemd-shutdown[1]: Sending SIGTERM to remaining processes...
+Aug 30 22:25:57 laptop kernel: nvidia-modeset: ERROR: GPU:0: Error while waiting for GPU progress: 0x0000c67d:0 2:1:0:4044
+Aug 30 22:25:58 laptop systemd-journald[612]: Journal stopped

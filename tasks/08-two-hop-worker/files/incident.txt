@@ -1,0 +1,3 @@
+INC-2291  opened 2026-10-11 14:20
+Customer reports checkout failed. Support captured request req=434573.
+Action: find which worker served it so we can pull that worker's heap dump.

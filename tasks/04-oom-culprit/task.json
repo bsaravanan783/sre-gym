@@ -1,0 +1,11 @@
+{
+  "prompt": "The laptop froze and the kernel OOM killer fired twice (see dmesg.txt). Which process actually exhausted the memory? Name the process.",
+  "max_steps": 5,
+  "needs_write": false,
+  "checks": [
+    {
+      "type": "answer_regex",
+      "pattern": "\\belectron\\b"
+    }
+  ]
+}

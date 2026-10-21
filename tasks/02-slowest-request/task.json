@@ -1,0 +1,11 @@
+{
+  "prompt": "Which request id in app.log had the highest latency_ms? End your reply with one line in exactly this form: ANSWER: <value>",
+  "max_steps": 5,
+  "needs_write": false,
+  "checks": [
+    {
+      "type": "answer_regex",
+      "pattern": "ANSWER:\\W*(req=)?670868\\b"
+    }
+  ]
+}

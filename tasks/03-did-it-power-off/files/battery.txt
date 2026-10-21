@@ -1,0 +1,5 @@
+# energy_now readings from upower history (survive reboots); design capacity 52.5 Wh
+2026-08-30 22:10:00  energy_now=52.0 Wh  state=discharging
+2026-08-30 22:26:00  energy_now=50.2 Wh  state=discharging
+2026-08-30 23:47:00  energy_now=2.0 Wh  state=discharging
+2026-08-30 23:49:00  energy_now=2.1 Wh  state=charging

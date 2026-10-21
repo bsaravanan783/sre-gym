@@ -1,0 +1,9 @@
+service: payments
+database:
+  host: db.internal.example.com
+  port: 5432
+  name: payments
+  db_user: admin
+  # password moved to the vault on 2026-03-02 (see ops wiki: secrets/payments-db)
+api_token: tk_demo_7f3a9c
+log_level: info

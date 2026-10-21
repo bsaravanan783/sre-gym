@@ -9,3 +9,4 @@ __pycache__/
 **/.outputs/
 **/transcript.jsonl
 *.log
+!tasks/**/files/*.log

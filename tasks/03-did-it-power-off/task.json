@@ -1,0 +1,11 @@
+{
+  "prompt": "The user shut the laptop down at about 22:26 and opened the lid at 23:47: it was hot and the battery was at 4%. Using journal.txt and battery.txt, did the laptop actually power off? If not, estimate the average power draw in watts while it was supposedly off.",
+  "max_steps": 5,
+  "needs_write": false,
+  "checks": [
+    {
+      "type": "answer_regex",
+      "pattern": "\\b(32|33|34|35|36|37|38)(\\.\\d+)?\\s*(W|watt)"
+    }
+  ]
+}

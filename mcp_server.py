@@ -12,7 +12,7 @@ def run_bash(command):
         return f"exit code: {r.returncode}\nstderr: {r.stderr}\nstdout: {r.stdout}"
 
     except subprocess.TimeoutExpired:
-        return f"Command {command} timedout after {timeout_duration} seconds"
+        raise TimeoutError(f"Command {command} timedout after {timeout_duration} seconds")
 
     except Exception as e:
         return f"Error : {e}"
@@ -30,37 +30,34 @@ def is_inside_project_path(path):
 
 
 def read_file(path,start_line=None,end_line=None):
+    if not is_inside_project_path(path):
+        raise PermissionError("Access denied: Path is outside the project folder.")
     try:
-        if not is_inside_project_path(path):
-            return "Access denied: Path is outside the project folder."
-
         with open(path, "r") as file:
             lines = file.readlines()
-            total = len(lines)
-            start = start_line if start_line is not None else 1
-            end = end_line if end_line is not None else total
-
-            if total == 0:
-                return "[file is empty]"
-            if start < 1:
-                return "start_line must be >= 1"
-            if start_line and start > total:
-                return f"file has only {total} lines and given start_line as {start_line}"
-            if end < start:
-                return f"Error: end_line ({end_line}) must be >= start_line ({start}). To read to the end of the file, omit end_line."
-            
-            end = min(end , total)
-
-            content = "".join(lines[start-1:end])
-            if start_line is not None or end_line is not None:
-                return f"[lines {start}-{end} of {total}]\n" + content
-
-            return content
-
     except FileNotFoundError:
-        return f"The file {path} was not found in the current directory."
-    except Exception as e:
-        return f"An unexpected error occurred: {e}"
+        raise FileNotFoundError(f"The file {path} was not found in the current directory.")
+
+    total = len(lines)
+    start = start_line if start_line is not None else 1
+    end = end_line if end_line is not None else total
+
+    if total == 0:
+        return "[file is empty]"
+    if start < 1:
+        raise ValueError("start_line must be >= 1")
+    if start_line and start > total:
+        raise ValueError(f"file has only {total} lines and given start_line as {start_line}")
+    if end < start:
+        raise  ValueError(f"end_line ({end_line}) must be >= start_line ({start}). To read to the end of the file, omit end_line.")
+    
+    end = min(end , total)
+
+    content = "".join(lines[start-1:end])
+    if start_line is not None or end_line is not None:
+        return f"[lines {start}-{end} of {total}]\n" + content
+
+    return content
 
 
 

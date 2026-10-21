@@ -1,0 +1,13 @@
+kernel: Linux version 7.1.5-zen1 (nixbld@localhost)
+kernel: amdgpu 0000:05:00.0: amdgpu: SMU is initialized successfully!
+kernel: Bluetooth: hci0: Firmware revision 0.0 build 14 week 33 2025
+systemd[1]: Started NetworkManager.service - Network Manager.
+kernel: ACPI BIOS Error (bug): CreateField of length zero (\_SB.WMID.WQBC.BUF0) (20250404/dsopcode-133)
+kernel: ACPI Error: Aborting method \_SB.WMID.WQBC due to previous error (AE_AML_OPERAND_VALUE) (20250404/psparse-529)
+kernel: ACPI BIOS Error (bug): CreateField of length zero (\_SB.WMID.WQBD.BUF0) (20250404/dsopcode-133)
+kernel: amdgpu 0000:05:00.0: amdgpu: [gfxhub] page fault (src_id:0 ring:24 vmid:3 pasid:32771)
+kernel: amdgpu 0000:05:00.0: amdgpu:  Faulty UTCL2 client ID: SQC (data), PERMISSION_FAULTS: 0x3
+kernel: amdgpu 0000:05:00.0: amdgpu: ring gfx_0.0.0 timeout, signaled seq=88213, emitted seq=88215
+kernel: amdgpu 0000:05:00.0: amdgpu: Process codium pid 22841 thread codium:cs0 pid 22870
+kernel: amdgpu 0000:05:00.0: amdgpu: Ring gfx_0.0.0 reset succeeded
+kernel: traps: codium[22870] trap int3 ip:55d1c0a1b2c3 sp:7ffd5a1b2c30 error:0 in codium[...]

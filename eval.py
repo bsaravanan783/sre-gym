@@ -6,6 +6,8 @@ from mcp_client import MCPClient
 HERE = os.path.dirname(os.path.abspath(__file__))
 SERVER = os.path.join(HERE, "mcp_server.py")
 TASKS = os.path.join(HERE, "tasks")
+BUCKET = "/srv/sre-work"                                # 1G ext4 loop mount (nixos-config hosts/laptop/default.nix)
+TRANSCRIPTS = os.path.join(HERE, "results", "transcripts")
 
 def grade(task, answer, workdir):
     """Return (passed, reason). Every check must pass."""
@@ -25,28 +27,42 @@ def grade(task, answer, workdir):
             raise ValueError(f"unknown check type {c['type']}")
     return True, "all checks passed"
 
+def keep_transcript_and_clean(workdir):
+    """Copy the transcript out of the bucket, then delete the workdir. Returns the kept path or None."""
+    src = os.path.join(workdir, "transcript.jsonl")
+    kept = None
+    if os.path.exists(src):                       # the agent may crash before writing one
+        os.makedirs(TRANSCRIPTS, exist_ok=True)
+        kept = os.path.join(TRANSCRIPTS, os.path.basename(workdir) + ".jsonl")
+        shutil.copy(src, kept)
+    shutil.rmtree(workdir)
+    return kept
+
 def run_task(task_dir, model):
     task = json.load(open(os.path.join(task_dir, "task.json")))
-    workdir = tempfile.mkdtemp(prefix="sre-eval-")
-    shutil.copytree(os.path.join(task_dir, "files"), workdir, dirs_exist_ok=True)
-    policy =  ({**DEFAULT_POLICY, "rules": [("write_file", None, "allow")] + DEFAULT_POLICY["rules"]}
-          if task["needs_write"] else DEFAULT_POLICY)                    # DEFAULT_POLICY, plus ("write_file", None, "allow") when needs_write
-    old_cwd = os.getcwd()
-    os.chdir(workdir)                       # transcript.jsonl + .outputs/ land here, not in the repo
-    client = MCPClient([sys.executable, SERVER], cwd=workdir)
-    start = time.time()
+    workdir = tempfile.mkdtemp(prefix="sre-eval-", dir=BUCKET)   # inside the 1G bucket, not the real disk
     try:
-        agent = Agent(model, model, max_steps=task["max_steps"], policy=policy, mcp=client,
-                      tools=client.list_tools() + WORKER_TOOLS)            # server tools + the built-in write_file schema
-        out = agent.run(task["prompt"])
+        shutil.copytree(os.path.join(task_dir, "files"), workdir, dirs_exist_ok=True)
+        policy =  ({**DEFAULT_POLICY, "rules": [("write_file", None, "allow")] + DEFAULT_POLICY["rules"]}
+              if task["needs_write"] else DEFAULT_POLICY)                    # DEFAULT_POLICY, plus ("write_file", None, "allow") when needs_write
+        old_cwd = os.getcwd()
+        os.chdir(workdir)                       # transcript.jsonl + .outputs/ land here, not in the repo
+        client = MCPClient( [sys.executable, SERVER ,"--rw"] if task["needs_write"] else [sys.executable, SERVER] , cwd=workdir)
+        start = time.time()
+        try:
+            agent = Agent(model, model, max_steps=task["max_steps"], policy=policy, mcp=client,
+                          tools=client.list_tools() + WORKER_TOOLS)            # server tools + the built-in write_file schema
+            out = agent.run(task["prompt"])
+        finally:
+            client.close()
+            os.chdir(old_cwd)
+        passed, reason = grade(task, out.get("answer") or "", workdir)   # grade BEFORE the workdir is deleted
     finally:
-        client.close()
-        os.chdir(old_cwd)
-    passed, reason = grade(task, out.get("answer") or "", workdir)
+        kept = keep_transcript_and_clean(workdir)                        # runs on pass, fail and crash
     return {"task": os.path.basename(task_dir), "model": model, "passed": passed, "reason": reason,
             "outcome": out["outcome"], "steps": out["steps"], "answer": out.get("answer"),
             "prompt_tokens": out["prompt_tokens"], "completion_tokens": out["completion_tokens"],
-            "seconds": round(time.time() - start, 1), "workdir": workdir}
+            "seconds": round(time.time() - start, 1), "transcript": kept}
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -59,6 +75,12 @@ if __name__ == "__main__":
     if args.only:                              # loop: runs × sorted task dirs (filter by --only),
         tasks = [ t for t in tasks if t.startswith(args.only)]
     
+    if not os.path.ismount(BUCKET):           # a failed mount leaves a plain folder on the real disk: no cap
+        sys.exit(f"{BUCKET} is not mounted; refusing to run without the size cap")
+    for name in os.listdir(BUCKET):           # leftovers from a run killed before its cleanup
+        if name.startswith("sre-eval-"):      # only ours: lost+found belongs to the filesystem
+            shutil.rmtree(os.path.join(BUCKET, name))
+
     results = []
 
     for run in range(args.runs):

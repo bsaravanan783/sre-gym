@@ -8,5 +8,6 @@ __pycache__/
 # Run artefacts: regenerated on every run
 **/.outputs/
 **/transcript.jsonl
+results/transcripts/
 *.log
 !tasks/**/files/*.log

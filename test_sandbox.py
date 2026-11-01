@@ -1,11 +1,12 @@
 """Contract tests: one test per promise in sandbox.py. Every backend must pass the same file.
 
-Run:  python3 test_sandbox.py [docker]        (no pytest needed; also works under pytest)
+Run:  python3 test_sandbox.py [docker|firecracker]     (no pytest needed; under pytest set SBX_KIND)
+      firecracker: nix shell nixpkgs#firecracker nixpkgs#e2fsprogs -c python3 test_sandbox.py firecracker
 """
 import os, resource, subprocess, sys, tempfile, time
 from sandbox import make_sandbox, SandboxError, OUTPUT_CAP
 
-KIND = sys.argv[1] if len(sys.argv) > 1 and __name__ == "__main__" else "docker"
+KIND = sys.argv[1] if len(sys.argv) > 1 and __name__ == "__main__" else os.environ.get("SBX_KIND", "docker")
 
 
 def box(writable=False, workdir=None):
@@ -13,9 +14,19 @@ def box(writable=False, workdir=None):
 
 
 def live_boxes():
-    """Docker-backend leak check: how many of our boxes exist right now."""
-    r = subprocess.run(["docker", "ps", "-q", "--filter", "label=sre-gym=1"], capture_output=True, text=True)
-    return len(r.stdout.split())
+    """Leak check: how many of our boxes exist right now."""
+    if KIND == "docker":
+        r = subprocess.run(["docker", "ps", "-q", "--filter", "label=sre-gym=1"], capture_output=True, text=True)
+        return len(r.stdout.split())
+    n = 0                                   # firecracker: scan /proc ourselves (no pgrep -f: it can match itself)
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            argv = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+        except OSError:
+            continue
+        if argv[0].endswith(b"firecracker") and any(b"/sbx-fc-" in a for a in argv):
+            n += 1
+    return n
 
 
 # 1. run() returns within its timeout, always
@@ -131,10 +142,77 @@ def test_7c_host_home_not_visible():
 # hygiene: background leftovers don't survive into the next call
 def test_8_leftovers_reset():
     with box() as b:
-        r1 = b.run("sleep 100 &")
-        r2 = b.run("cat /proc/[0-9]*/comm | grep -c '^sleep$'")    # no ps in this image; only the box's own sleep should remain
+        r1 = b.run("sleep 1234 &")
+        r2 = b.run("cat /proc/[0-9]*/cmdline | tr '\\0' ' ' | grep -c 'sleep 123[4]'")   # [4]: grep can't match itself
     assert "leftover" in r1.note, r1
-    assert r2.stdout.strip() == "1", r2
+    assert r2.stdout.strip() == "0", r2
+
+
+# hostile guest: the agent is untrusted. No VM needed: a fake unix socket plays the guest.
+def _fake_guest(behaviour):
+    """Start a fake Firecracker vsock socket. Returns a FirecrackerSandbox pointed at it."""
+    import socket, threading
+    from sandbox import FirecrackerSandbox
+    d = tempfile.mkdtemp(prefix="sbx-hostile-")
+    path = os.path.join(d, "v.sock")
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(path)
+    srv.listen(1)
+
+    def serve():
+        conn, _ = srv.accept()
+        f = conn.makefile("rb")
+        f.readline()                                     # CONNECT 52
+        conn.sendall(b"OK 1\n")
+        f.readline()                                     # the request
+        try:
+            behaviour(conn)
+        except OSError:                                  # host hung up: good
+            pass
+        conn.close()
+        srv.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    b = FirecrackerSandbox(d)
+    b.uds = path
+    return b
+
+
+def _call_within(b, deadline, limit):
+    """Run b._call in a thread; report (finished_in_time, exception)."""
+    import threading
+    box = {}
+    def go():
+        try:
+            b._call({"op": "run", "cmd": "true", "timeout": 1}, deadline=deadline)
+        except Exception as e:
+            box["err"] = e
+    t = threading.Thread(target=go, daemon=True)
+    t.start()
+    t.join(limit)
+    return not t.is_alive(), box.get("err")
+
+
+def test_9_hostile_guest_slow_drip():
+    def drip(conn):                                      # one byte every 0.5 s, never a newline
+        while True:
+            conn.sendall(b"x")
+            time.sleep(0.5)
+    done, err = _call_within(_fake_guest(drip), deadline=2, limit=5)
+    assert done, "a 2 s call was still waiting after 5 s: the deadline is per read, not per call"
+    assert err is not None, "a guest that never finished its reply was accepted"
+
+
+def test_9b_hostile_guest_flood():
+    def flood(conn):                                     # endless bytes, never a newline
+        chunk = b"x" * 65536
+        while True:
+            conn.sendall(chunk)
+    peak_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    done, err = _call_within(_fake_guest(flood), deadline=10, limit=12)
+    grew_mb = (resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - peak_before) / 1024
+    assert done and err is not None, f"flood not rejected (done={done}, err={err!r})"
+    assert grew_mb < 50, f"host memory grew {grew_mb:.0f} MB from a flooding guest"
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """Sandbox interface: one run(), many machines.
 
-    with make_sandbox("docker", workdir, writable=False) as box:
+    with make_sandbox("docker" | "firecracker", workdir, writable=False) as box:
         r = box.run("ls", timeout=30)        # Result(exit_code, stdout, stderr, timed_out, ms, note)
 
 The contract every backend keeps (test_sandbox.py checks each one):
@@ -141,9 +141,190 @@ class DockerSandbox(Sandbox):
         subprocess.run(["docker", "rm", "-f", cid], capture_output=True)
 
 
+class FirecrackerSandbox(Sandbox):
+    """A microVM per sandbox. Needs firecracker + e2fsprogs on PATH:
+         nix shell nixpkgs#firecracker nixpkgs#e2fsprogs -c python3 ...
+
+    Host ⇄ guest: Firecracker turns guest vsock port 52 into a unix socket on the host.
+    Workdir: copied INTO a fresh ext4 image (second disk), copied BACK after the VM has stopped.
+    """
+    FC = os.path.expanduser("~/fc")
+    KERNEL = os.path.join(FC, "vmlinux-6.1.155")
+    ROOTFS = os.path.join(FC, "rootfs-agent.ext4")              # rootfs-min + /fc-agent, /fc-agent.py, /work
+    ARGS = "console=ttyS0 reboot=k panic=1 ro i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd init=/fc-agent"
+    PORT = 52
+    MAX_REPLY = 2 * 6 * OUTPUT_CAP + 64 * 1024                  # 2 capped streams × 6 (a \0 byte → \u0000 in JSON) + slack
+    BOOT_LIMIT = 10                                             # seconds for the agent to answer its first ping
+
+    def __init__(self, workdir, writable=False):
+        super().__init__(workdir, writable)
+        self.proc = None
+
+    def start(self):
+        import shutil, json, tempfile
+        for tool in ("firecracker", "mkfs.ext4", "debugfs"):
+            if shutil.which(tool) is None:
+                raise SandboxError(f"{tool} not on PATH (run inside nix shell nixpkgs#firecracker nixpkgs#e2fsprogs)")
+        self.dir = tempfile.mkdtemp(prefix="sbx-fc-")
+        self.img = os.path.join(self.dir, "work.ext4")
+        self.uds = os.path.join(self.dir, "v.sock")
+        try:
+            self._make_work_image()
+            cfg = {
+                "boot-source": {"kernel_image_path": self.KERNEL,
+                                "boot_args": f"{self.ARGS} sbx.rw={int(self.writable)}"},
+                "drives": [
+                    {"drive_id": "rootfs", "path_on_host": self.ROOTFS, "is_root_device": True, "is_read_only": True},
+                    {"drive_id": "work", "path_on_host": self.img, "is_root_device": False,
+                     "is_read_only": not self.writable},                   # promise 7: ro is enforced by the VMM too
+                ],
+                "machine-config": {"vcpu_count": 1, "mem_size_mib": 256},
+                "vsock": {"guest_cid": 3, "uds_path": self.uds},
+                # no "network-interfaces": the guest has no NIC at all (promise 5)
+            }
+            path = os.path.join(self.dir, "vm.json")
+            with open(path, "w") as f:
+                json.dump(cfg, f)
+            self.log = open(os.path.join(self.dir, "console.log"), "wb")   # a FILE, not a pipe nobody reads
+            self.proc = subprocess.Popen(["firecracker", "--no-api", "--config-file", path],
+                                         stdin=subprocess.DEVNULL, stdout=self.log, stderr=subprocess.STDOUT,
+                                         env={"PATH": os.environ["PATH"]})          # promise 6: no host env
+            self._wait_ready()
+        except BaseException:
+            self.id = self.dir           # so stop() cleans up whatever got made
+            self.stop()
+            raise
+        self.id = self.dir
+
+    def _make_work_image(self):
+        used = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(self.workdir) for f in fs
+                   if os.path.isfile(os.path.join(d, f)))
+        size_mb = max(64, 2 * used // 2**20 + 32)
+        r = subprocess.run(["mkfs.ext4", "-q", "-F", "-O", "^has_journal", "-E", "root_owner=1000:1000",
+                            "-d", self.workdir, self.img, f"{size_mb}M"], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SandboxError(f"mkfs.ext4 failed: {r.stderr.strip()}")
+
+    def _wait_ready(self):
+        end = time.perf_counter() + self.BOOT_LIMIT
+        while time.perf_counter() < end:
+            if self.proc.poll() is not None:
+                raise SandboxError(f"firecracker exited ({self.proc.returncode}): {self._console_tail()}")
+            try:
+                self._call({"op": "ping"}, deadline=1)
+                return
+            except (OSError, ValueError, SandboxError):
+                time.sleep(0.01)
+        raise SandboxError(f"guest agent not ready after {self.BOOT_LIMIT}s: {self._console_tail()}")
+
+    def _console_tail(self):
+        try:
+            return open(os.path.join(self.dir, "console.log"), "rb").read()[-500:].decode(errors="replace")
+        except OSError:
+            return ""
+
+    def _call(self, req, deadline):
+        """One request → one reply over Firecracker's vsock unix socket.
+
+        `deadline` is for the WHOLE call: socket.settimeout() alone limits each read separately, so a guest
+        sending one byte every few seconds would never trip it. Every read gets only the time that is left.
+        The guest is untrusted: replies are size-limited, and a reply without its newline is an error.
+        """
+        import json, socket
+        end = time.monotonic() + deadline
+
+        def left():
+            r = end - time.monotonic()
+            if r <= 0:
+                raise socket.timeout(f"call took longer than {deadline}s")
+            return r
+
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(left())
+            s.connect(self.uds)
+            s.sendall(f"CONNECT {self.PORT}\n".encode())
+            if not self._read_line(s, 64, left).startswith(b"OK"):        # Firecracker's handshake answer
+                raise SandboxError("vsock handshake refused (agent not listening yet?)")
+            s.settimeout(left())
+            s.sendall(json.dumps(req).encode() + b"\n")
+            return json.loads(self._read_line(s, self.MAX_REPLY, left))
+
+    @staticmethod
+    def _read_line(s, limit, left):
+        buf = bytearray()
+        while True:
+            s.settimeout(left())
+            chunk = s.recv(65536)
+            if not chunk:
+                raise SandboxError("guest closed the connection before a full reply")
+            buf += chunk
+            nl = buf.find(b"\n")
+            if nl >= 0:
+                return bytes(buf[:nl + 1])
+            if len(buf) > limit:
+                raise SandboxError(f"guest reply longer than {limit} bytes")
+
+    def run(self, cmd, timeout=30):
+        import socket
+        if self.id is None or self.proc is None or self.proc.poll() is not None:
+            raise SandboxError("sandbox is not running")
+        t0 = time.perf_counter()
+        try:
+            rep = self._call({"op": "run", "cmd": cmd, "timeout": timeout}, deadline=timeout + 1 + BACKSTOP)
+        except socket.timeout:
+            self._kill()                                                    # HARD deadline: the whole VM goes
+            raise SandboxError(f"guest agent hung past {timeout}s + {BACKSTOP}s backstop; VM killed")
+        except (OSError, ValueError) as e:
+            self._kill()
+            raise SandboxError(f"talking to the guest agent failed: {e}") from e
+        ms = (time.perf_counter() - t0) * 1000
+        return Result(int(rep["exit_code"]), str(rep["stdout"]), str(rep["stderr"]),
+                      bool(rep["timed_out"]), ms, str(rep.get("note", "")))
+
+    def _kill(self):
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait()
+
+    def _copy_back(self):
+        """Read the stopped VM's workdir image and copy new/changed files to the host workdir (no deletes)."""
+        import shutil, tempfile
+        out = tempfile.mkdtemp(prefix="sbx-out-", dir=self.dir)
+        subprocess.run(["debugfs", "-R", f"rdump / {out}", self.img], capture_output=True)   # chown warnings: fine
+        shutil.rmtree(os.path.join(out, "lost+found"), ignore_errors=True)
+        shutil.copytree(out, self.workdir, dirs_exist_ok=True)
+
+    def stop(self):
+        import shutil
+        if self.id is None:                                                 # already stopped
+            return
+        self.id = None
+        try:
+            if self.writable and self.proc is not None and self.proc.poll() is None:
+                try:
+                    self._call({"op": "shutdown"}, deadline=3)              # guest: sync + umount /work
+                except (OSError, ValueError, SandboxError):
+                    pass
+                try:
+                    self.proc.wait(timeout=3)                               # reboot=k → firecracker exits 0
+                except subprocess.TimeoutExpired:
+                    pass
+                # Only a clean exit means the guest flushed and unmounted. After a crash or kill the image may be
+                # half-written: losing the agent's changes beats copying broken files into the real workdir.
+                if self.proc.returncode == 0:
+                    self._copy_back()
+        finally:
+            self._kill()
+            if getattr(self, "log", None):
+                self.log.close()
+            shutil.rmtree(self.dir, ignore_errors=True)
+
+
 def make_sandbox(kind, workdir, writable=False):
     if kind == "docker":
         return DockerSandbox(workdir, writable)
-    if kind in ("firecracker", "e2b"):
-        raise NotImplementedError(f"{kind} backend comes in chunk 4b/4c")
+    if kind == "firecracker":
+        return FirecrackerSandbox(workdir, writable)
+    if kind == "e2b":
+        raise NotImplementedError("e2b backend comes in chunk 4c")
     raise ValueError(f"unknown sandbox kind: {kind!r}")

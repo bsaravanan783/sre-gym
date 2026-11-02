@@ -1,7 +1,8 @@
 """Contract tests: one test per promise in sandbox.py. Every backend must pass the same file.
 
-Run:  python3 test_sandbox.py [docker|firecracker]     (no pytest needed; under pytest set SBX_KIND)
+Run:  python3 test_sandbox.py [docker|firecracker|e2b]     (no pytest needed; under pytest set SBX_KIND)
       firecracker: nix shell nixpkgs#firecracker nixpkgs#e2fsprogs -c python3 test_sandbox.py firecracker
+      e2b:         ~/fc/.venv/bin/python test_sandbox.py e2b        (costs a fraction of a cent of credit)
 """
 import os, resource, subprocess, sys, tempfile, time
 from sandbox import make_sandbox, SandboxError, OUTPUT_CAP
@@ -18,6 +19,11 @@ def live_boxes():
     if KIND == "docker":
         r = subprocess.run(["docker", "ps", "-q", "--filter", "label=sre-gym=1"], capture_output=True, text=True)
         return len(r.stdout.split())
+    if KIND == "e2b":                       # ask E2B which of OUR boxes are still running (and billing)
+        from e2b import Sandbox, SandboxQuery
+        from sandbox import E2BSandbox
+        q = SandboxQuery(metadata={"sre-gym": "1"})
+        return len(Sandbox.list(query=q, api_key=E2BSandbox._api_key()).next_items())
     n = 0                                   # firecracker: scan /proc ourselves (no pgrep -f: it can match itself)
     for pid in filter(str.isdigit, os.listdir("/proc")):
         try:
@@ -99,11 +105,14 @@ def test_4b_flood_does_not_fill_host_memory():
     assert grew_mb < 50, f"host process peak memory grew {grew_mb:.0f} MB for 300 MB of output"
 
 
-# 5. no network
+# 5. no network. A TCP connect is not enough: E2B's egress proxy completes the handshake and THEN blocks,
+#    so "connected" ≠ "reached". Only an answer from the far side counts.
 def test_5_no_network():
+    probe = ("exec 3<>/dev/tcp/1.1.1.1/80 && printf 'GET / HTTP/1.0\\r\\nHost: 1.1.1.1\\r\\n\\r\\n' >&3 "
+             "&& timeout 5 head -c 12 <&3")
     with box() as b:
-        r = b.run("timeout 3 bash -c 'echo > /dev/tcp/1.1.1.1/443' && echo REACHED")
-    assert "REACHED" not in r.stdout, r
+        r = b.run(probe, timeout=10)
+    assert "HTTP/" not in r.stdout, f"the box got an HTTP answer from the internet: {r.stdout!r}"
 
 
 # 6. no host secrets
@@ -213,6 +222,32 @@ def test_9b_hostile_guest_flood():
     grew_mb = (resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - peak_before) / 1024
     assert done and err is not None, f"flood not rejected (done={done}, err={err!r})"
     assert grew_mb < 50, f"host memory grew {grew_mb:.0f} MB from a flooding guest"
+
+
+def test_10_hostile_archive_stays_in_workdir():
+    """E2B copy-back: the tar is built inside the box, so a command can plant `../escaped.txt` in it."""
+    import io, tarfile
+    from types import SimpleNamespace
+    from sandbox import E2BSandbox
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        data = b"planted\n"
+        info = tarfile.TarInfo("../escaped.txt")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+    parent = tempfile.mkdtemp(prefix="sbx-hostile-")
+    work = os.path.join(parent, "work")
+    os.mkdir(work)
+    fake = SimpleNamespace(                                   # plays the E2B box: no network, no credit
+        commands=SimpleNamespace(run=lambda cmd, **kw: SimpleNamespace(stdout=str(len(buf.getvalue())))),
+        files=SimpleNamespace(read=lambda *a, **kw: buf.getvalue()))
+    b = E2BSandbox(work, writable=True)
+    b.sbx = fake
+    try:
+        b._copy_back()
+    except Exception:
+        pass                                                  # refusing the archive is fine
+    assert not os.path.exists(os.path.join(parent, "escaped.txt")), "a file from the box landed OUTSIDE the workdir"
 
 
 if __name__ == "__main__":

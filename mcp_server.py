@@ -1,76 +1,41 @@
-import subprocess,sys,json
-import os
+import sys, json, os, shlex
+from sandbox import make_sandbox, SandboxError
 
-
-
-IMAGE = "redis:7"      # temporary: has bash, grep, awk, sed, sort (checked) — swap for a purpose-built image later
+# Which machine runs the agent's commands: --sandbox=docker|firecracker|e2b (or SBX_KIND), default docker.
+#   docker      : bind mount → host and box see the SAME files instantly (one kernel, one page cache)
+#   firecracker : workdir copied into a disk image; changes come back only when the VM stops cleanly
+#   e2b         : workdir uploaded to a VM in the US; changes downloaded at stop
+# For the copy-based backends the BOX is the source of truth while the task runs, so read_file reads from it.
+KIND = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--sandbox=")), os.environ.get("SBX_KIND", "docker"))
 TIMEOUT = 30
-CONTAINER = None       # set once at startup
-
-def start_sandbox(workdir, writable):
-    mode = "rw" if writable else "ro"                                    # "rw" or "ro" depending on writable
-    cmd = ["docker", "run", "-d", "--rm",
-            "--pids-limit", "100",
-            "--memory", "256m",
-            "--memory-swap", "256m",
-            "--read-only",
-            "--tmpfs", "/tmp:size=64m",
-            "--network", "none",
-            "--user", "1000:1000",
-            "--cap-drop=ALL",
-            "--security-opt", "no-new-privileges",
-           "-v", f"{workdir}:/work:{mode}", "-w", "/work",
-           "--entrypoint", "sleep", IMAGE, "3600"]  # self-destruct: max lifetime in seconds, as a string
-    r = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return r.stdout.strip()                        # docker prints the id plus a newline
+WRITABLE = "--rw" in sys.argv
+BOX = None             # set once at startup
 
 
-def box_broken():
-    r = subprocess.run(["docker", "exec", CONTAINER, "true"], capture_output=True)
-    return r.returncode != 0
-
-def leftover_count():
-    r = subprocess.run(["docker", "top", CONTAINER], capture_output=True, text=True)
-    return len(r.stdout.strip().splitlines()) - 2
-
+def new_box():
+    box = make_sandbox(KIND, os.getcwd(), WRITABLE)
+    box.start()
+    return box
 
 
 def recover():
-    global CONTAINER                          # we reassign CONTAINER below
-    r = subprocess.run(["docker", "restart", "-t", "0", CONTAINER], capture_output=True)
-    if r.returncode == 0:
-        return "the sandbox was restarted"
-    CONTAINER = start_sandbox(os.getcwd(), WRITABLE)   # same folder and mode as at startup
-    return "the old sandbox had died, so a new one was started"
-
+    """The box itself failed: throw it away and start a fresh one from the host workdir."""
+    global BOX
+    BOX.stop()
+    BOX = new_box()
+    lost = "/tmp was wiped" if KIND == "docker" else "/tmp was wiped and changes since the start may be lost"
+    return f"the sandbox was replaced: {lost}"
 
 
 def run_bash(command):
     try:
-        # r = subprocess.run(command,shell=True, capture_output= True,timeout=timeout_duration,text=True,stdin=subprocess.DEVNULL)
-
-        r =  subprocess.run(["docker", "exec", CONTAINER, "timeout", str(TIMEOUT), "bash", "-c", command],   # timer INSIDE the box
-                           capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                           timeout=TIMEOUT + 5) 
-
-        reason = None
-        if leftover_count() > 0:
-            reason = "leftover background processes were killed"
-        elif box_broken():                    # only probe when nothing is left over (~56 ms)
-            reason = "the sandbox could not start a new process (likely out of memory)"
-        note = ""
-        if reason:
-            note = f"\n[sandbox] {reason}; {recover()}: /tmp was wiped, /work is unchanged. Continue from where you were."
-
-
-        if r.returncode == 124:
-              raise TimeoutError(f"Command {command} timed out after {TIMEOUT} seconds" + note)
-
-        # return truncate(f"exit code: {r.returncode}\nstdout: {r.stdout}\nstderr: {r.stderr}")
-        return f"exit code: {r.returncode}\nstderr: {r.stderr}\nstdout: {r.stdout}" + note
-
-    except subprocess.TimeoutExpired:
-        raise TimeoutError(f"Command {command} timedout after {TIMEOUT} seconds")
+        r = BOX.run(command, timeout=TIMEOUT)
+    except SandboxError as e:
+        raise RuntimeError(f"sandbox failure ({e}); {recover()}. Continue from where you were.")
+    if r.timed_out:
+        raise TimeoutError(f"Command {command} timed out after {TIMEOUT} seconds")
+    note = f"\n[sandbox] {r.note}. Continue from where you were." if r.note else ""
+    return f"exit code: {r.exit_code}\nstderr: {r.stderr}\nstdout: {r.stdout}" + note
 
 
 
@@ -85,14 +50,24 @@ def is_inside_project_path(path):
             return True 
 
 
+def _read_lines(path):
+    if KIND == "docker":                      # same files as the box: read them directly
+        try:
+            with open(path, "r") as file:
+                return file.readlines()
+        except FileNotFoundError:
+            raise FileNotFoundError(f"The file {path} was not found in the current directory.")
+    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(os.getcwd()))
+    r = BOX.run(f"cat -- {shlex.quote('/work/' + rel)}", timeout=TIMEOUT)
+    if r.exit_code != 0:
+        raise FileNotFoundError(f"The file {path} was not found in the current directory.")
+    return r.stdout.splitlines(keepends=True)   # capped by the sandbox; page with start_line/end_line
+
+
 def read_file(path,start_line=None,end_line=None):
     if not is_inside_project_path(path):
         raise PermissionError("Access denied: Path is outside the project folder.")
-    try:
-        with open(path, "r") as file:
-            lines = file.readlines()
-    except FileNotFoundError:
-        raise FileNotFoundError(f"The file {path} was not found in the current directory.")
+    lines = _read_lines(path)
 
     total = len(lines)
     start = start_line if start_line is not None else 1
@@ -114,9 +89,6 @@ def read_file(path,start_line=None,end_line=None):
         return f"[lines {start}-{end} of {total}]\n" + content
 
     return content
-
-
-WRITABLE = "--rw" in sys.argv
 
 
 TOOLS = [
@@ -160,8 +132,8 @@ def handle(msg):
             return {"content": [{"type": "text", "text": f"Error : {str(e)}"}], "isError": True}
     raise KeyError(method)                   # unknown method
 
-CONTAINER = start_sandbox(os.getcwd(), WRITABLE)      
-print(f"sandbox {CONTAINER[:12]} started", file=sys.stderr)
+BOX = new_box()
+print(f"{KIND} sandbox {BOX.id} started", file=sys.stderr)
 try:
     for line in sys.stdin:
         msg = json.loads(line)
@@ -175,4 +147,4 @@ try:
         print(json.dumps(reply), flush=True)
 
 finally:
-    subprocess.run(["docker","rm","-f",CONTAINER], capture_output=True)
+    BOX.stop()                                        # writable copy-based boxes copy their changes back here

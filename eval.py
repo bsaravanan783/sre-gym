@@ -1,6 +1,6 @@
 
 import argparse, json, os, re, shutil, sys, tempfile, time
-from agent import Agent, DEFAULT_POLICY, WORKER_TOOLS, model_config
+from agent import Agent, DEFAULT_POLICY, model_config
 from mcp_client import MCPClient
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -51,7 +51,7 @@ def run_task(task_dir, model):
         start = time.time()
         try:
             agent = Agent(model, model, max_steps=task["max_steps"], policy=policy, mcp=client,
-                          tools=client.list_tools() + WORKER_TOOLS)            # server tools + the built-in write_file schema
+                          tools=client.list_tools())            # write_file comes from the server, only with --rw
             out = agent.run(task["prompt"])
         finally:
             client.close()

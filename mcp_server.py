@@ -1,4 +1,4 @@
-import sys, json, os, shlex
+import sys, json, os, shlex, base64
 from sandbox import make_sandbox, SandboxError
 
 # Which machine runs the agent's commands: --sandbox=docker|firecracker|e2b (or SBX_KIND), default docker.
@@ -64,6 +64,33 @@ def _read_lines(path):
     return r.stdout.splitlines(keepends=True)   # capped by the sandbox; page with start_line/end_line
 
 
+MAX_WRITE = 64 * 1024     # through the box the content travels inside the command (E2B: an env var, ≤128 KB)
+
+
+def write_file(path, content):
+    """Writes where the agent's commands will see it: the host for docker (bind mount), the box otherwise.
+    For copy-based backends a host write would be invisible to bash AND overwritten by the copy-back at stop."""
+    if not is_inside_project_path(path):
+        return "Access denied: Path is outside the project folder."
+    if KIND == "docker":
+        try:
+            with open(path, "w") as file:
+                return f"Wrote {file.write(content)} characters to {path}"
+        except FileNotFoundError:
+            return f"Error: The directory structure for '{path}' was not found."
+        except PermissionError as pe:
+            return f"Error: permission denied {pe}"
+    data = content.encode()
+    if len(data) > MAX_WRITE:
+        return f"Error: content is {len(data)} bytes; the limit is {MAX_WRITE}. Make a smaller, targeted change."
+    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(os.getcwd()))
+    b64 = base64.b64encode(data).decode()
+    r = BOX.run(f"echo {b64} | base64 -d > {shlex.quote('/work/' + rel)}", timeout=TIMEOUT)
+    if r.exit_code != 0:
+        return f"Error: could not write {path}: {r.stderr.strip()}"
+    return f"Wrote {len(content)} characters to {path}"
+
+
 def read_file(path,start_line=None,end_line=None):
     if not is_inside_project_path(path):
         raise PermissionError("Access denied: Path is outside the project folder.")
@@ -111,7 +138,18 @@ TOOLS = [
             }
             },
 ]
-HANDLERS = {"read_file": read_file, "run_bash": run_bash}
+WRITE_TOOL = {"name": "write_file", "description": "Write a file to the current directory and return the number of characters written along with the path.It overwrites the content in existing files.Always read a file with read_file before modifying it. Make minimal changes; do not rewrite whole files.",
+    "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file, e.g. notes.txt"},
+                    "content": {"type": "string" , "description": "Content inside the file , e.g. This text has been written in this file"}
+                },
+                "required": ["path","content"]
+            }}
+if WRITABLE:                                  # a read-only task is not even offered the tool
+    TOOLS.append(WRITE_TOOL)
+HANDLERS = {"read_file": read_file, "run_bash": run_bash, **({"write_file": write_file} if WRITABLE else {})}
 
 def handle(msg):
     method = msg.get("method")
@@ -125,7 +163,7 @@ def handle(msg):
         args = msg["params"].get("arguments", {})
         try:
             if name not in HANDLERS:
-                return {"content": [{"type": "text", "text": f"Unknown tool: {name} . Available: read_file,run_bash"}], "isError": True}
+                return {"content": [{"type": "text", "text": f"Unknown tool: {name} . Available: {', '.join(HANDLERS)}"}], "isError": True}
             text = HANDLERS[name](**args)                      # look up the handler, call it with **args
             return {"content": [{"type": "text", "text": text}], "isError": False}
         except Exception as e:

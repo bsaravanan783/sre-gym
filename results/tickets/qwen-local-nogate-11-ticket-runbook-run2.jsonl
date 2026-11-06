@@ -1,0 +1,1 @@
+{"text": "The payments service failed due to the database server running out of disk space, which caused the database to shut down and subsequent connection requests to be rejected."}

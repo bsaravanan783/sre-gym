@@ -1,0 +1,1 @@
+{"text": "The payments service failed due to the database server shutting down because there was no free disk space. The error logs indicate the database could not extend its data files or write to WAL, confirming the disk full issue."}

@@ -1,0 +1,1 @@
+{"text": "Investigation update: Payments service outage since 09:12 caused by database connection refused error to db.internal:5432 (DATABASE_URL from .env). Engineers are working to restore the DB cluster."}

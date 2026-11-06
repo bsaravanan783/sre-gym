@@ -1,0 +1,1 @@
+{"text": "The payments service failed because the database server ran out of disk space and could not extend its data files, leading to a shutdown. This caused the connection refusal errors seen in the logs."}

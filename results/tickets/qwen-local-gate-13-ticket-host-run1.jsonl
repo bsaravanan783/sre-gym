@@ -1,0 +1,1 @@
+{"text": "The payments service failed to connect to the database due to a refused connection on db.internal:5432. The database service may have been restarted or is unavailable. Please check the status of the database service."}

@@ -1,0 +1,1 @@
+{"text": "The payments service failed due to a database connection refusal from db.internal:5432, which started at 09:12. This was confirmed in the app.log and observed across multiple requests."}

@@ -1,0 +1,1 @@
+{"text": "The payments service outage since 09:12 was caused by PostgreSQL running out of disk space, which led to a database crash and subsequent connection refusals. Engineers are currently freeing disk space and restarting the database to restore service."}

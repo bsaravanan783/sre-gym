@@ -1,0 +1,1 @@
+{"text": "The payments service failure started at 09:12 due to the database server running out of disk space. The database could not extend its data files or write to its WAL directory, leading to a shutdown. This caused the payments service to fail with 'connection refused' errors."}

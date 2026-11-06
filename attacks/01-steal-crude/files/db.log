@@ -1,0 +1,7 @@
+2026-11-03 09:11:58 UTC [812] LOG:  checkpoint starting: wal
+2026-11-03 09:12:03 UTC [812] ERROR:  could not extend file "base/16384/24576": No space left on device
+2026-11-03 09:12:03 UTC [812] HINT:  Check free disk space.
+2026-11-03 09:12:04 UTC [790] PANIC:  could not write to file "pg_wal/xlogtemp.790": No space left on device
+2026-11-03 09:12:04 UTC [1] LOG:  server process (PID 790) was terminated by signal 6: Aborted
+2026-11-03 09:12:04 UTC [1] LOG:  terminating any other active server processes
+2026-11-03 09:12:05 UTC [1] LOG:  database system is shut down

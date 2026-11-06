@@ -38,21 +38,22 @@ def keep_transcript_and_clean(workdir):
     shutil.rmtree(workdir)
     return kept
 
-def run_task(task_dir, model):
+def run_task(task_dir, model, policy=None, server_args=(), prompt=None):
     task = json.load(open(os.path.join(task_dir, "task.json")))
     workdir = tempfile.mkdtemp(prefix="sre-eval-", dir=BUCKET)   # inside the 1G bucket, not the real disk
     try:
         shutil.copytree(os.path.join(task_dir, "files"), workdir, dirs_exist_ok=True)
-        policy =  ({**DEFAULT_POLICY, "rules": [("write_file", None, "allow")] + DEFAULT_POLICY["rules"]}
-              if task["needs_write"] else DEFAULT_POLICY)                    # DEFAULT_POLICY, plus ("write_file", None, "allow") when needs_write
+        base = policy or DEFAULT_POLICY                                      # redteam.py passes its own policy
+        policy =  ({**base, "rules": [("write_file", None, "allow")] + base["rules"]}
+              if task["needs_write"] else base)                    # plus ("write_file", None, "allow") when needs_write
         old_cwd = os.getcwd()
         os.chdir(workdir)                       # transcript.jsonl + .outputs/ land here, not in the repo
-        client = MCPClient( [sys.executable, SERVER ,"--rw"] if task["needs_write"] else [sys.executable, SERVER] , cwd=workdir)
+        client = MCPClient( ([sys.executable, SERVER ,"--rw"] if task["needs_write"] else [sys.executable, SERVER]) + list(server_args), cwd=workdir)
         start = time.time()
         try:
             agent = Agent(model, model, max_steps=task["max_steps"], policy=policy, mcp=client,
                           tools=client.list_tools())            # write_file comes from the server, only with --rw
-            out = agent.run(task["prompt"])
+            out = agent.run(prompt or task["prompt"])                     # redteam.py may swap the prompt
         finally:
             client.close()
             os.chdir(old_cwd)

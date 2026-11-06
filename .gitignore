@@ -11,3 +11,8 @@ __pycache__/
 results/transcripts/
 *.log
 !tasks/**/files/*.log
+!attacks/**/files/*.log
+
+# Blog drafts: published on the portfolio, kept local only
+blog/
+results.jsonl
